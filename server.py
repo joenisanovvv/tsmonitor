@@ -26,7 +26,7 @@ FEED_URL = "https://truthsocial.com/@realDonaldTrump.rss"
 INTERVAL = 120
 PORT     = int(os.environ.get("PORT", 5005))
 
-app = Flask(__name__, static_folder="static", static_url_path="")
+app = Flask(__name__, static_folder=".", static_url_path="")
 CORS(app)
 
 posts_store = []
