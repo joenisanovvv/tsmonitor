@@ -156,8 +156,10 @@ def index():
     return send_from_directory(".", "monitor.html")
 
 
+# Start polling thread when app loads (works with gunicorn)
+t = threading.Thread(target=poll_feed, daemon=True)
+t.start()
+
 if __name__ == "__main__":
     log(f"Starting server on port {PORT}")
-    t = threading.Thread(target=poll_feed, daemon=True)
-    t.start()
     app.run(host="0.0.0.0", port=PORT, debug=False)
