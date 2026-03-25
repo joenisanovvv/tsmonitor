@@ -505,7 +505,17 @@ async function fetchPosts() {
 }
 
 async function analyzeWithClaude(text, keywords) {
-  return 'Analysis handled by local server (see server terminal).';
+  try {
+    const r = await fetch(getBase() + '/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: text, keywords: keywords })
+    });
+    const d = await r.json();
+    return d.analysis || 'No analysis returned.';
+  } catch(e) {
+    return 'Analysis failed: ' + e.message;
+  }
 }
 
 function getKeywords() {
