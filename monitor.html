@@ -475,46 +475,103 @@ function highlight(text, kw) {
   return text.replace(re, '<mark>$1</mark>');
 }
 
-function getBase() {
-  return window.location.origin;
-}
-
 async function fetchPosts() {
   dlog('Fetching from local server...');
   const keywords = getKeywords().join(', ');
-  // sync keywords to server
-  try { await fetch(getBase() + '/set_keywords/' + encodeURIComponent(keywords)); } catch(e) {}
-  const r = await fetch(getBase() + '/posts');
+  try { await fetch('http://localhost:5005/set_keywords/' + encodeURIComponent(keywords)); } catch(e) {}
+  const r = await fetch('http://localhost:5005/posts');
   if (!r.ok) throw new Error('Local server returned ' + r.status);
   const data = await r.json();
   if (data.error) dlog('Server error: ' + data.error);
-  dlog('Got ' + data.posts.length + ' posts from server. Scanned: ' + data.total_scanned);
-  // update stats from server
+  dlog('Got ' + data.posts.length + ' posts. Scanned: ' + data.total_scanned);
   document.getElementById('s-scanned').textContent = data.total_scanned || 0;
-  if (data.last_check) {
-    document.getElementById('last-check').textContent = 'Last check: ' + new Date(data.last_check).toLocaleTimeString();
-  }
+  if (data.last_check) document.getElementById('last-check').textContent = 'Last check: ' + new Date(data.last_check).toLocaleTimeString();
   return (data.posts || []).map(p => ({
-    id: p.id,
-    text: p.text,
+    id: p.id, text: p.text,
     date: p.fetched_at ? new Date(p.fetched_at) : new Date(),
-    link: p.link,
-    matched: p.matched || [],
-    analysis: p.analysis || null
+    link: p.link, matched: p.matched || [], analysis: p.analysis || null
   }));
 }
+async function fetchPosts_old() {
+  const methods = [
+    async () => {
+      dlog('Trying rss2json...');
+      const r = await fetch('https://api.rss2json.com/v1/api.json?rss_url=' + encodeURIComponent('https://truthsocial.com/@realDonaldTrump.rss') + '&count=20');
+      const d = await r.json();
+      dlog('rss2json: status=' + d.status + ' items=' + (d.items||[]).length);
+      if (d.status === 'ok' && d.items?.length) {
+        return d.items.map(i => ({
+          id: i.guid || i.link,
+          text: stripHtml(i.description || i.content || i.title || ''),
+          date: i.pubDate ? new Date(i.pubDate) : new Date(),
+          link: i.link
+        })).filter(p => p.text.length > 5);
+      }
+      throw new Error('rss2json: ' + d.status);
+    },
+    async () => {
+      dlog('Trying allorigins...');
+      const r = await fetch('https://api.allorigins.win/get?url=' + encodeURIComponent('https://truthsocial.com/@realDonaldTrump.rss'));
+      const d = await r.json();
+      dlog('allorigins: ' + (d.contents||'').length + ' chars');
+      if (!d.contents || d.contents.length < 100) throw new Error('empty');
+      const doc = new DOMParser().parseFromString(d.contents, 'text/xml');
+      const items = doc.querySelectorAll('item');
+      dlog('allorigins items: ' + items.length);
+      if (!items.length) throw new Error('no items');
+      return Array.from(items).map(item => ({
+        id: item.querySelector('guid')?.textContent || Math.random().toString(),
+        text: stripHtml(item.querySelector('description')?.textContent || item.querySelector('title')?.textContent || ''),
+        date: new Date(item.querySelector('pubDate')?.textContent || Date.now()),
+        link: item.querySelector('link')?.textContent
+      })).filter(p => p.text.length > 5);
+    },
+    async () => {
+      dlog('Trying corsproxy...');
+      const r = await fetch('https://corsproxy.io/?' + encodeURIComponent('https://truthsocial.com/@realDonaldTrump.rss'));
+      const text = await r.text();
+      dlog('corsproxy: ' + text.length + ' chars');
+      if (text.length < 100) throw new Error('empty');
+      const doc = new DOMParser().parseFromString(text, 'text/xml');
+      const items = doc.querySelectorAll('item');
+      dlog('corsproxy items: ' + items.length);
+      if (!items.length) throw new Error('no items');
+      return Array.from(items).map(item => ({
+        id: item.querySelector('guid')?.textContent || Math.random().toString(),
+        text: stripHtml(item.querySelector('description')?.textContent || item.querySelector('title')?.textContent || ''),
+        date: new Date(item.querySelector('pubDate')?.textContent || Date.now()),
+        link: item.querySelector('link')?.textContent
+      })).filter(p => p.text.length > 5);
+    }
+  ];
 
-async function analyzeWithClaude(text, keywords) {
+  for (const method of methods) {
+    try {
+      const posts = await method();
+      if (posts?.length) return posts;
+    } catch(e) {
+      dlog('FAIL: ' + e.message);
+    }
+  }
+  throw new Error('All fetch methods failed. Truth Social feed may be inaccessible.');
+}
+
+async function analyzeWithClaude(text, keyword) {
+  if (!apiKey) return 'No API key set — enter your Anthropic API key in the banner above to enable analysis.';
   try {
-    const r = await fetch(getBase() + '/analyze', {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: text, keywords: keywords })
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+      body: JSON.stringify({
+        model: 'claude-opus-4-5',
+        max_tokens: 400,
+        messages: [{ role: 'user', content: `You are a political economy analyst. Trump just posted on Truth Social using the word "${keyword}".\n\nPost: """${text}"""\n\nRespond with exactly 3 bullet points:\n- SECTOR/TICKER: which sector or ticker(s) are relevant\n- SIGNAL: bullish / bearish / neutral and the core reason\n- CONFIDENCE: low / medium / high + the single most important caveat\n\nSpeculative analysis only. Not financial advice.` }]
+      })
     });
-    const d = await r.json();
-    return d.analysis || 'No analysis returned.';
+    const data = await res.json();
+    return data.content?.[0]?.text || 'No response from Claude.';
   } catch(e) {
-    return 'Analysis failed: ' + e.message;
+    return 'Claude analysis failed: ' + e.message;
   }
 }
 
@@ -548,28 +605,6 @@ function renderPost(post, hitKeywords, isTest) {
   const badgeText = isTest ? 'TEST POST' : isHit ? '⚑ ' + hitKeywords.map(k => k.toUpperCase()).join(', ') : 'NO MATCH';
   const keywords = getKeywords();
 
-  const analysisHTML = isHit ? `
-    <div class="analysis">
-      <div class="analysis-header"><span class="analysis-tag">Claude Market Analysis</span></div>
-      <div class="analysis-body ${post.analysis ? '' : 'loading'}" id="${safeId}">
-        ${post.analysis
-          ? post.analysis.replace(/\n/g, '<br>')
-          : '<span class="spinner"></span> Analyzing signal…'}
-      </div>
-    </div>` : '';
-
-
-  if (isHit && !post.analysis) {
-    analyzeWithClaude(post.text, hitKeywords.join(', ')).then(result => {
-      const el = document.getElementById(safeId);
-      if (el) {
-        el.classList.remove('loading');
-        el.innerHTML = result.replace(/\n/g, '<br>');
-      }
-    });
-    return;
-  }
-
   card.innerHTML = `
     <div class="post-header">
       <div class="post-meta">
@@ -579,32 +614,51 @@ function renderPost(post, hitKeywords, isTest) {
       <span class="badge ${isTest ? 'badge-test' : isHit ? 'badge-hit' : 'badge-ok'}">${badgeText}</span>
     </div>
     <div class="post-body">${highlightAll((post.text || '').slice(0, 500) + (post.text?.length > 500 ? '…' : ''), isHit ? hitKeywords : keywords)}</div>
-    ${analysisHTML}
+    ${isHit ? `
+      <div class="analysis">
+        <div class="analysis-header"><span class="analysis-tag">Claude Market Analysis</span></div>
+        <div class="analysis-body loading" id="${safeId}">
+          <span class="spinner"></span> Analyzing signal…
+        </div>
+      </div>` : ''}
   `;
 
   feed.insertBefore(card, feed.firstChild);
+
+  if (isHit) {
+    analyzeWithClaude(post.text, hitKeywords.join(', ')).then(result => {
+      const el = document.getElementById(safeId);
+      if (el) {
+        el.classList.remove('loading');
+        el.innerHTML = result.replace(/\n/g, '<br>');
+      }
+    });
+  }
 }
 
 async function runCheck() {
   const keywords = getKeywords();
   setStatus('live', 'FETCHING...');
+  document.getElementById('last-check').textContent = 'Last check: ' + new Date().toLocaleTimeString();
   dlog('Checking feed for keywords: ' + keywords.join(', '));
 
   let posts;
   try {
     posts = await fetchPosts();
   } catch(e) {
-    setStatus('error', 'FETCH ERROR — is the server running? Run: python3 truthsocial_server.py');
+    setStatus('error', 'FETCH ERROR');
     dlog('ERROR: ' + e.message);
     return;
   }
 
   const newPosts = posts.filter(p => !seen.has(p.id));
   newPosts.forEach(p => seen.add(p.id));
+  totalScanned += newPosts.length;
+  document.getElementById('s-scanned').textContent = totalScanned;
   dlog('New posts: ' + newPosts.length);
 
   for (const post of newPosts) {
-    const hits = post.matched?.length ? post.matched : matchedKeywords(post.text, keywords);
+    const hits = matchedKeywords(post.text, keywords);
     if (hits.length > 0) { totalHits++; document.getElementById('s-hits').textContent = totalHits; }
     renderPost(post, hits, false);
   }
