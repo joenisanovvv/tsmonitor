@@ -558,6 +558,18 @@ function renderPost(post, hitKeywords, isTest) {
       </div>
     </div>` : '';
 
+
+  if (isHit && !post.analysis) {
+    analyzeWithClaude(post.text, hitKeywords.join(', ')).then(result => {
+      const el = document.getElementById(safeId);
+      if (el) {
+        el.classList.remove('loading');
+        el.innerHTML = result.replace(/\n/g, '<br>');
+      }
+    });
+    return;
+  }
+
   card.innerHTML = `
     <div class="post-header">
       <div class="post-meta">
