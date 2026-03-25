@@ -1,19 +1,5 @@
 [phases.install]
 cmds = ["pip install -r requirements.txt"]
 
-[phases.build]
-cmds = []
-
 [start]
 cmd = "gunicorn server:app --workers 1 --threads 4 --bind 0.0.0.0:$PORT"
-```
-
-Also check your GitHub repo structure — it should look like this at the **root level**:
-```
-server.py
-requirements.txt
-Procfile
-railway.json
-static/
-  monitor.html
-README.md
