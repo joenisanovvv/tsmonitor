@@ -142,6 +142,14 @@ def get_posts():
 def get_status():
     return jsonify(status)
 
+@app.route("/analyze", methods=["POST"])
+def analyze_route():
+    data = request.get_json()
+    post_text = data.get("text", "")
+    keywords = data.get("keywords", "")
+    result = analyze_with_claude(post_text, keywords)
+    return jsonify({"analysis": result})
+
 @app.route("/set_keywords/<path:keywords>")
 def set_keywords(keywords):
     keywords_ref["value"] = keywords
