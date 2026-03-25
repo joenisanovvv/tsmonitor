@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TS Monitor — Market Signal Tracker</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,400&family=Bebas+Neue&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --bg2: #111;
+    --bg3: #161616;
+    --border: #222;
+    --border2: #2a2a2a;
+    --text: #e8e8e8;
+    --muted: #555;
+    --muted2: #333;
+    --accent: #c8f135;
+    --accent2: #a8d120;
+    --red: #ff4444;
+    --red-dim: #ff444422;
+    --red-border: #ff444444;
+    --amber: #ffaa00;
+    --teal: #00d4aa;
+    --mono: 'DM Mono', monospace;
+    --sans: 'DM Sans', sans-serif;
+    --display: 'Bebas Neue', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+
+  /* ── scan line overlay ── */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px);
+    pointer-events: none;
+    z-index: 9999;
+  }
+
+  /* ── layout ── */
+  .shell { display: grid; grid-template-columns: 260px 1fr; min-height: 100vh; }
+
+  /* ── sidebar ── */
+  .sidebar {
+    background: var(--bg2);
+    border-right: 1px solid var(--border);
+    padding: 28px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+  }
+
+  .logo {
+    font-family: var(--display);
+    font-size: 28px;
+    letter-spacing: 2px;
+    color: var(--accent);
+    line-height: 1;
+  }
+  .logo span { color: var(--muted); font-size: 11px; font-family: var(--mono); display: block; letter-spacing: 3px; margin-top: 4px; }
+
+  .status-pill {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--bg3);
+    border: 1px solid var(--border2);
+    border-radius: 6px;
+    padding: 10px 14px;
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted2); flex-shrink: 0; }
+  .dot.live { background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: blink 2s infinite; }
+  .dot.error { background: var(--red); box-shadow: 0 0 8px var(--red); }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+  .section-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 2px;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+
+  .field { margin-bottom: 14px; }
+  .field label { font-size: 11px; color: var(--muted); font-family: var(--mono); display: block; margin-bottom: 5px; letter-spacing: 1px; }
+  .field input, .field select {
+    width: 100%;
+    background: var(--bg3);
+    border: 1px solid var(--border2);
+    border-radius: 5px;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 13px;
+    padding: 8px 10px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .field input:focus, .field select:focus { border-color: var(--accent); }
+  .field select option { background: var(--bg2); }
+
+  .btn {
+    width: 100%;
+    padding: 11px;
+    border-radius: 6px;
+    border: none;
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 1px;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-transform: uppercase;
+  }
+  .btn-primary { background: var(--accent); color: #000; }
+  .btn-primary:hover { background: var(--accent2); }
+  .btn-primary:disabled { opacity: 0.4; cursor: default; }
+  .btn-ghost { background: transparent; color: var(--muted); border: 1px solid var(--border2); margin-top: 8px; }
+  .btn-ghost:hover { border-color: var(--muted); color: var(--text); }
+
+  /* ── stats ── */
+  .stats { display: flex; flex-direction: column; gap: 8px; }
+  .stat {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px 14px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .stat-label { font-size: 11px; color: var(--muted); font-family: var(--mono); }
+  .stat-val { font-family: var(--display); font-size: 24px; color: var(--text); letter-spacing: 1px; }
+  .stat-val.red { color: var(--red); }
+  .stat-val.green { color: var(--accent); }
+
+  /* ── main ── */
+  .main { padding: 28px; display: flex; flex-direction: column; gap: 20px; }
+
+  /* ── top bar ── */
+  .topbar { display: flex; justify-content: space-between; align-items: center; }
+  .page-title { font-family: var(--display); font-size: 36px; letter-spacing: 2px; color: var(--text); }
+  .last-check { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+
+  /* ── api key banner ── */
+  .key-banner {
+    background: #1a1400;
+    border: 1px solid #443300;
+    border-radius: 8px;
+    padding: 16px 20px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .key-banner.hidden { display: none; }
+  .key-banner-icon { font-size: 20px; }
+  .key-banner-text { flex: 1; font-size: 13px; color: #ffcc55; }
+  .key-banner-text strong { display: block; margin-bottom: 2px; }
+  .key-input {
+    background: #0d0d00;
+    border: 1px solid #443300;
+    border-radius: 5px;
+    color: #ffcc55;
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 7px 10px;
+    outline: none;
+    width: 280px;
+  }
+  .key-input:focus { border-color: var(--amber); }
+  .btn-save-key {
+    padding: 7px 14px;
+    background: var(--amber);
+    color: #000;
+    border: none;
+    border-radius: 5px;
+    font-family: var(--mono);
+    font-size: 12px;
+    cursor: pointer;
+    font-weight: 500;
+  }
+
+  /* ── feed ── */
+  .feed-header { display: flex; align-items: center; justify-content: space-between; }
+  .feed-title { font-family: var(--display); font-size: 18px; letter-spacing: 2px; color: var(--muted); }
+  .clear-btn { font-family: var(--mono); font-size: 11px; color: var(--muted); background: none; border: 1px solid var(--border2); border-radius: 4px; padding: 4px 10px; cursor: pointer; }
+  .clear-btn:hover { color: var(--text); border-color: var(--muted); }
+
+  .feed { display: flex; flex-direction: column; gap: 12px; }
+
+  .empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    font-family: var(--mono);
+    color: var(--muted);
+    font-size: 13px;
+    border: 1px dashed var(--border2);
+    border-radius: 10px;
+  }
+  .empty-state-icon { font-size: 32px; display: block; margin-bottom: 12px; opacity: 0.4; }
+
+  /* ── post card ── */
+  .post {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 20px;
+    animation: fadeIn 0.3s ease;
+  }
+  @keyframes fadeIn { from { opacity:0; transform: translateY(-6px); } to { opacity:1; transform: translateY(0); } }
+
+  .post.hit {
+    background: var(--red-dim);
+    border-color: var(--red-border);
+    box-shadow: 0 0 20px rgba(255,68,68,0.08);
+  }
+  .post.test { border-color: #44448844; background: #0a0a1a; }
+
+  .post-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; gap: 12px; }
+  .post-meta { display: flex; flex-direction: column; gap: 3px; }
+  .post-time { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .post-link { font-family: var(--mono); font-size: 11px; color: var(--teal); text-decoration: none; }
+  .post-link:hover { text-decoration: underline; }
+
+  .badge {
+    font-family: var(--mono);
+    font-size: 10px;
+    padding: 3px 10px;
+    border-radius: 4px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .badge-hit { background: var(--red-dim); color: var(--red); border: 1px solid var(--red-border); }
+  .badge-ok { background: var(--bg3); color: var(--muted); border: 1px solid var(--border2); }
+  .badge-test { background: #0a0a1a; color: #8888ff; border: 1px solid #44448844; }
+
+  .post-body { font-size: 14px; color: #ccc; line-height: 1.7; margin-bottom: 14px; }
+  .post-body mark { background: rgba(200, 241, 53, 0.2); color: var(--accent); border-radius: 3px; padding: 0 3px; font-weight: 500; }
+
+  /* ── analysis box ── */
+  .analysis {
+    background: var(--bg3);
+    border: 1px solid var(--border2);
+    border-radius: 8px;
+    padding: 14px 16px;
+  }
+  .analysis-header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .analysis-tag {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 2px;
+    color: var(--accent);
+    text-transform: uppercase;
+    border: 1px solid rgba(200,241,53,0.3);
+    padding: 2px 8px;
+    border-radius: 3px;
+  }
+  .analysis-body { font-size: 13px; color: #bbb; line-height: 1.8; font-family: var(--sans); }
+  .analysis-body.loading { color: var(--muted); font-style: italic; display: flex; align-items: center; gap: 8px; }
+  .spinner { width: 12px; height: 12px; border: 1.5px solid var(--muted2); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s linear infinite; flex-shrink: 0; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── debug log ── */
+  .debug-panel {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    display: none;
+  }
+  .debug-panel.show { display: block; }
+  .debug-header { padding: 10px 16px; background: var(--bg3); border-bottom: 1px solid var(--border); font-family: var(--mono); font-size: 11px; color: var(--muted); display: flex; justify-content: space-between; }
+  .debug-body { padding: 12px 16px; font-family: var(--mono); font-size: 11px; color: var(--muted); max-height: 160px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; line-height: 1.7; }
+
+  /* ── ticker tape ── */
+  .ticker-wrap { overflow: hidden; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: var(--bg2); padding: 6px 0; }
+  .ticker { display: flex; gap: 40px; animation: ticker 30s linear infinite; width: max-content; }
+  .ticker-item { font-family: var(--mono); font-size: 11px; color: var(--muted); white-space: nowrap; }
+  .ticker-item span { color: var(--accent); margin-left: 6px; }
+  @keyframes ticker { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+
+  /* ── scrollbar ── */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<div class="shell">
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div>
+      <div class="logo">TS Monitor<span>MARKET SIGNAL TRACKER</span></div>
+    </div>
+
+    <div class="status-pill">
+      <span class="dot" id="dot"></span>
+      <span id="status-text" style="font-family:var(--mono);font-size:12px;color:var(--muted)">IDLE</span>
+    </div>
+
+    <div>
+      <div class="section-label">Configuration</div>
+      <div class="field">
+        <label>Keywords (comma separated)</label>
+        <input type="text" id="keyword" value="gift, tariff, deal" placeholder="gift, tariff, deal">
+      </div>
+      <div class="field">
+        <label>Poll Interval</label>
+        <select id="interval">
+          <option value="60">Every 1 minute</option>
+          <option value="120" selected>Every 2 minutes</option>
+          <option value="300">Every 5 minutes</option>
+          <option value="600">Every 10 minutes</option>
+        </select>
+      </div>
+      <button class="btn btn-primary" id="btn-start" onclick="startMonitor()">START MONITORING</button>
+      <button class="btn btn-ghost" id="btn-stop" disabled onclick="stopMonitor()">STOP</button>
+      <button class="btn btn-ghost" onclick="injectTest()" style="margin-top:6px;">INJECT TEST POST</button>
+      <button class="btn btn-ghost" onclick="toggleDebug()" style="margin-top:6px;">TOGGLE DEBUG LOG</button>
+    </div>
+
+    <div class="stats">
+      <div class="section-label">Statistics</div>
+      <div class="stat">
+        <span class="stat-label">SCANNED</span>
+        <span class="stat-val green" id="s-scanned">0</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">HITS</span>
+        <span class="stat-val red" id="s-hits">0</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="main">
+
+    <!-- ticker tape -->
+    <div class="ticker-wrap">
+      <div class="ticker">
+        <span class="ticker-item">TRUTH SOCIAL MONITOR<span>LIVE</span></span>
+        <span class="ticker-item">KEYWORD DETECTION<span>ACTIVE</span></span>
+        <span class="ticker-item">CLAUDE AI ANALYSIS<span>READY</span></span>
+        <span class="ticker-item">MARKET SIGNAL TRACKER<span>v2.0</span></span>
+        <span class="ticker-item">FOR RESEARCH PURPOSES ONLY<span>NOT FINANCIAL ADVICE</span></span>
+        <span class="ticker-item">TRUTH SOCIAL MONITOR<span>LIVE</span></span>
+        <span class="ticker-item">KEYWORD DETECTION<span>ACTIVE</span></span>
+        <span class="ticker-item">CLAUDE AI ANALYSIS<span>READY</span></span>
+        <span class="ticker-item">MARKET SIGNAL TRACKER<span>v2.0</span></span>
+        <span class="ticker-item">FOR RESEARCH PURPOSES ONLY<span>NOT FINANCIAL ADVICE</span></span>
+      </div>
+    </div>
+
+    <!-- API key banner -->
+    <div class="key-banner" id="key-banner">
+      <span class="key-banner-icon">⚠</span>
+      <div class="key-banner-text">
+        <strong>Anthropic API Key Required for Claude Analysis</strong>
+        Get yours free at console.anthropic.com
+      </div>
+      <input class="key-input" id="api-key-input" type="password" placeholder="sk-ant-...">
+      <button class="btn-save-key" onclick="saveKey()">SAVE</button>
+    </div>
+
+    <!-- topbar -->
+    <div class="topbar">
+      <div class="page-title">LIVE FEED</div>
+      <div style="display:flex;align-items:center;gap:12px;">
+        <span class="last-check" id="last-check">—</span>
+        <button class="clear-btn" onclick="clearFeed()">CLEAR</button>
+        <button class="clear-btn" onclick="checkNow()">CHECK NOW</button>
+      </div>
+    </div>
+
+    <!-- debug panel -->
+    <div class="debug-panel" id="debug-panel">
+      <div class="debug-header">
+        <span>DEBUG LOG</span>
+        <span id="debug-count">0 lines</span>
+      </div>
+      <div class="debug-body" id="debug-body"></div>
+    </div>
+
+    <!-- feed -->
+    <div class="feed" id="feed">
+      <div class="empty-state" id="empty-state">
+        <span class="empty-state-icon">◎</span>
+        Press START MONITORING to begin watching Trump's Truth Social feed.<br>
+        Alerts fire the moment your keyword is detected.
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+let intervalId = null;
+let seen = new Set();
+let totalScanned = 0;
+let totalHits = 0;
+let debugLines = 0;
+let apiKey = localStorage.getItem('ts_api_key') || '';
+
+// init
+if (apiKey) {
+  document.getElementById('key-banner').classList.add('hidden');
+  document.getElementById('api-key-input').value = apiKey;
+}
+
+function saveKey() {
+  const val = document.getElementById('api-key-input').value.trim();
+  if (!val) return;
+  apiKey = val;
+  localStorage.setItem('ts_api_key', val);
+  document.getElementById('key-banner').classList.add('hidden');
+  dlog('API key saved.');
+}
+
+function dlog(msg) {
+  const body = document.getElementById('debug-body');
+  const ts = new Date().toLocaleTimeString();
+  body.textContent += ts + ' ' + msg + '\n';
+  body.scrollTop = body.scrollHeight;
+  debugLines++;
+  document.getElementById('debug-count').textContent = debugLines + ' lines';
+}
+
+function toggleDebug() {
+  document.getElementById('debug-panel').classList.toggle('show');
+}
+
+function setStatus(state, msg) {
+  const dot = document.getElementById('dot');
+  dot.className = 'dot' + (state === 'live' ? ' live' : state === 'error' ? ' error' : '');
+  document.getElementById('status-text').textContent = msg;
+}
+
+function stripHtml(raw) {
+  return raw.replace(/<[^>]+>/g, ' ')
+    .replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>')
+    .replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&nbsp;/g,' ')
+    .replace(/\s+/g,' ').trim();
+}
+
+function timeAgo(date) {
+  const s = Math.floor((Date.now() - date) / 1000);
+  if (s < 60) return s + 's ago';
+  if (s < 3600) return Math.floor(s/60) + 'm ago';
+  if (s < 86400) return Math.floor(s/3600) + 'h ago';
+  return date.toLocaleDateString();
+}
+
+function highlight(text, kw) {
+  const re = new RegExp('(' + kw.replace(/[.*+?^${}()|[\]\\]/g,'\\$&') + ')', 'gi');
+  return text.replace(re, '<mark>$1</mark>');
+}
+
+async function fetchPosts() {
+  dlog('Fetching from local server...');
+  const keywords = getKeywords().join(', ');
+  // sync keywords to server
+  try { await fetch('http://localhost:5005/set_keywords/' + encodeURIComponent(keywords)); } catch(e) {}
+  const r = await fetch('http://localhost:5005/posts');
+  if (!r.ok) throw new Error('Local server returned ' + r.status);
+  const data = await r.json();
+  if (data.error) dlog('Server error: ' + data.error);
+  dlog('Got ' + data.posts.length + ' posts from server. Scanned: ' + data.total_scanned);
+  // update stats from server
+  document.getElementById('s-scanned').textContent = data.total_scanned || 0;
+  if (data.last_check) {
+    document.getElementById('last-check').textContent = 'Last check: ' + new Date(data.last_check).toLocaleTimeString();
+  }
+  return (data.posts || []).map(p => ({
+    id: p.id,
+    text: p.text,
+    date: p.fetched_at ? new Date(p.fetched_at) : new Date(),
+    link: p.link,
+    matched: p.matched || [],
+    analysis: p.analysis || null
+  }));
+}
+
+async function analyzeWithClaude(text, keywords) {
+  return 'Analysis handled by local server (see server terminal).';
+}
+
+function getKeywords() {
+  return document.getElementById('keyword').value
+    .split(',').map(k => k.trim()).filter(k => k.length > 0);
+}
+
+function matchedKeywords(text, keywords) {
+  return keywords.filter(kw => text.toLowerCase().includes(kw.toLowerCase()));
+}
+
+function highlightAll(text, keywords) {
+  let result = text;
+  keywords.forEach(kw => {
+    const re = new RegExp('(' + kw.replace(/[.*+?^${}()|[\]\\]/g,'\\$&') + ')', 'gi');
+    result = result.replace(re, '<mark>$1</mark>');
+  });
+  return result;
+}
+
+function renderPost(post, hitKeywords, isTest) {
+  const isHit = hitKeywords && hitKeywords.length > 0;
+  const feed = document.getElementById('feed');
+  document.getElementById('empty-state')?.remove();
+
+  const safeId = 'a' + Math.random().toString(36).slice(2, 10);
+  const card = document.createElement('div');
+  card.className = 'post' + (isHit ? ' hit' : isTest ? ' test' : '');
+
+  const badgeText = isTest ? 'TEST POST' : isHit ? '⚑ ' + hitKeywords.map(k => k.toUpperCase()).join(', ') : 'NO MATCH';
+  const keywords = getKeywords();
+
+  const analysisHTML = isHit ? `
+    <div class="analysis">
+      <div class="analysis-header"><span class="analysis-tag">Claude Market Analysis</span></div>
+      <div class="analysis-body ${post.analysis ? '' : 'loading'}" id="${safeId}">
+        ${post.analysis
+          ? post.analysis.replace(/\n/g, '<br>')
+          : '<span class="spinner"></span> Analyzing signal…'}
+      </div>
+    </div>` : '';
+
+  card.innerHTML = `
+    <div class="post-header">
+      <div class="post-meta">
+        <span class="post-time">${timeAgo(post.date)}</span>
+        ${post.link ? `<a class="post-link" href="${post.link}" target="_blank">↗ view on truth social</a>` : ''}
+      </div>
+      <span class="badge ${isTest ? 'badge-test' : isHit ? 'badge-hit' : 'badge-ok'}">${badgeText}</span>
+    </div>
+    <div class="post-body">${highlightAll((post.text || '').slice(0, 500) + (post.text?.length > 500 ? '…' : ''), isHit ? hitKeywords : keywords)}</div>
+    ${analysisHTML}
+  `;
+
+  feed.insertBefore(card, feed.firstChild);
+}
+
+async function runCheck() {
+  const keywords = getKeywords();
+  setStatus('live', 'FETCHING...');
+  dlog('Checking feed for keywords: ' + keywords.join(', '));
+
+  let posts;
+  try {
+    posts = await fetchPosts();
+  } catch(e) {
+    setStatus('error', 'FETCH ERROR — is the server running? Run: python3 truthsocial_server.py');
+    dlog('ERROR: ' + e.message);
+    return;
+  }
+
+  const newPosts = posts.filter(p => !seen.has(p.id));
+  newPosts.forEach(p => seen.add(p.id));
+  dlog('New posts: ' + newPosts.length);
+
+  for (const post of newPosts) {
+    const hits = post.matched?.length ? post.matched : matchedKeywords(post.text, keywords);
+    if (hits.length > 0) { totalHits++; document.getElementById('s-hits').textContent = totalHits; }
+    renderPost(post, hits, false);
+  }
+
+  if (newPosts.length === 0 && totalScanned === 0) {
+    dlog('No posts returned from feed.');
+  }
+
+  const secs = document.getElementById('interval').value;
+  setStatus('live', 'LIVE · NEXT IN ' + secs + 'S');
+}
+
+function injectTest() {
+  const keywords = getKeywords();
+  const post = {
+    id: 'test-' + Date.now(),
+    text: `AMERICA FIRST! The trade deal we just signed is the greatest gift to American farmers and our energy sector. The fake news media won't cover it but stock markets will LOVE this. More winning coming very soon!`,
+    date: new Date(),
+    link: null
+  };
+  seen.add(post.id);
+  totalScanned++;
+  totalHits++;
+  document.getElementById('s-scanned').textContent = totalScanned;
+  document.getElementById('s-hits').textContent = totalHits;
+  document.getElementById('last-check').textContent = 'Last check: ' + new Date().toLocaleTimeString();
+  const hits = matchedKeywords(post.text, keywords);
+  renderPost(post, hits.length ? hits : keywords, true);
+  dlog('Test post injected.');
+}
+
+function startMonitor() {
+  document.getElementById('btn-start').disabled = true;
+  document.getElementById('btn-stop').disabled = false;
+  runCheck();
+  intervalId = setInterval(runCheck, parseInt(document.getElementById('interval').value) * 1000);
+}
+
+function stopMonitor() {
+  clearInterval(intervalId); intervalId = null;
+  document.getElementById('btn-start').disabled = false;
+  document.getElementById('btn-stop').disabled = true;
+  setStatus('', 'STOPPED');
+}
+
+function checkNow() { runCheck(); }
+
+function clearFeed() {
+  document.getElementById('feed').innerHTML = '<div class="empty-state" id="empty-state"><span class="empty-state-icon">◎</span>Feed cleared. Monitoring continues in background.</div>';
+  seen.clear(); totalScanned = 0; totalHits = 0;
+  document.getElementById('s-scanned').textContent = '0';
+  document.getElementById('s-hits').textContent = '0';
+}
+</script>
+</body>
+</html>
