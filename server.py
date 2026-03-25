@@ -150,7 +150,10 @@ def set_keywords(keywords):
 
 @app.route("/")
 def index():
-    return send_from_directory("static", "monitor.html")
+    import os
+    files = os.listdir(".")
+    log(f"Current dir: {os.getcwd()}, files: {files}")
+    return send_from_directory(".", "monitor.html")
 
 
 if __name__ == "__main__":
